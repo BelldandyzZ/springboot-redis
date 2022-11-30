@@ -305,3 +305,120 @@ Reids操作SortSet的score属性的命令都是闭区间的。查询时边界值
 🉑SpringDataRedis整合了Jedis与Lettuce
 ```
 
+
+
+## ②Jedis快速入门
+
+```
+💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫💫
+1️⃣引入依赖
+2️⃣简历连接
+3️⃣测试
+4️⃣释放资源
+
+1. 普通方式：
+
+public class JedisTest {
+    private Jedis jedis;
+
+    @BeforeEach
+    public void initJedis(){
+        jedis = new Jedis("43.143.231.137",6379);
+        jedis.auth("Aa20341103");
+        jedis.select(0);
+    }
+
+    @AfterEach
+    public void destroy(){
+        if (jedis != null) {
+            jedis.close();
+        }
+    }
+
+    @Test
+    public void execution(){
+        String name = jedis.get("name");
+        System.out.println("name = " + name);
+    }
+}
+
+
+2. 线程池方式
+
+❗注意：一般都是用线程池的方式
+
+public class JedisConnectFactory {
+    public static final JedisPool jedisPool;
+    static{
+        JedisPoolConfig jedisPoolConfig = new JedisPoolConfig();
+        jedisPoolConfig.setMaxTotal(8);
+        jedisPoolConfig.setMaxIdle(8);
+        jedisPoolConfig.setMinIdle(4);
+        jedisPoolConfig.setMaxWaitMillis(1000);
+        jedisPool = new JedisPool(jedisPoolConfig,"43.143.231.137",6379,1000,"Aa20341103");
+    }
+}
+----------------------------------------------------------------------------
+
+@BeforeEach
+public void initJedis(){
+	jedis = jedisPool.getResource();
+}
+
+@Test
+.....
+
+@AfterEach
+.....
+```
+
+
+
+## ③SpringDataRedis快速入门
+
+### Ⅰ、简介
+
+```markdown
+🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑
+
+1. 整合了Redis的客户端。如提供了RedisTemplates这套标准来操作Redis，其底层具体的实现是由Jedis或Lettuce（默认）来做的。
+
+2. 在整合的基础上做了其他扩展（暂时略，哨兵集成之类的反正写了也不懂）
+```
+
+
+
+### Ⅱ、如何使用
+
+```markdown
+🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑
+
+1. Redis根据类型的不同对命令进行了分组，RedisTemplates也做了这件事情
+
+2. 使用步骤
+
+	（1）导入依赖，redis依赖与common-pool（创建连接池用）。
+	
+	（2）配置文件：端口，url，密码，连接池信息
+	
+	（3）注入RedisTemplates
+```
+
+![](img/SpringDataRedis API的使用.jpg)
+
+### Ⅲ、RedisTemplates的序列化
+
+```
+🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑🛑
+
+1️⃣使用Spring自动配置提供的RedisTemplates，会在代码中把key和value根据jdk序列化的规则序列化之后存到redis缓存中。
+  导致在代码中手动写出来的key和redis实际缓存中的key不一致。没有所见即所得的效果。针对这种情况有两种解决方案
+
+	⏹不使用jdk序列化规则。自定义RedisTemplates替换默认提供的RedisTemplates，并指定k与v的序列化规则。
+		
+	
+	⏹使用自动配置给我们提供的StringRedisTemplates，即k与v都转成字符串存储
+```
+
+![](img/redisTemplates两种序列化方案.jpg)
+
