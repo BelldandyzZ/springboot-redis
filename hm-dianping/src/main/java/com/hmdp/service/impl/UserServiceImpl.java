@@ -43,34 +43,31 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
     @Override
     public Result login(LoginFormDTO loginForm, HttpSession session) {
         String phone = loginForm.getPhone();
-        if(RegexUtils.isPhoneInvalid(phone)){
-            Result.fail("手机格式不正确");
-        }
         String code = loginForm.getCode();
+        //1. 验证手机格式是否正确
+        if(RegexUtils.isPhoneInvalid(phone)) return Result.fail("手机格式不正确");
+        //2. 从redis取出验证码
         String cacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
-        if(code == null || !code.equals(cacheCode)){
-            Result.fail("验证码错误");
-        }
+        //3. 对验证码进行验证
+        if(code == null || !code.equals(cacheCode)) return  Result.fail("验证码错误");
+        //4. 根据手机号查询用户
         User user = query().eq("phone", phone).one();
-
-        if(user == null){
-            user = createUserByPhone(phone);
-        }
-        //1. 生成token
-        String token = UUID.randomUUID(true).toString();
-
-        //2. 将user以Hash结构存到redis
+        //5. 如果该手机号没有用户则注册一个
+        if(user == null) user = createUserByPhone(phone);
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
-        Map<String, Object> map = BeanUtil.beanToMap(userDTO,new HashMap<>(),
-                CopyOptions.create()
-                .setIgnoreNullValue(true).setFieldValueEditor((fileName,fileValue) -> fileValue.toString())
-        );
-        String tokenKey = LOGIN_USER_KEY + token;
-        stringRedisTemplate.opsForHash().putAll(tokenKey,map);
 
-        //3. 设置token有效期
+        //6. 将user以Hash结构存到redis
+        String token = UUID.randomUUID(true).toString();
+        Map<String, Object> userMap = BeanUtil.beanToMap(userDTO,new HashMap<>(),CopyOptions.create()
+                                        .setIgnoreNullValue(true)
+                                        .setFieldValueEditor((fileName,fileValue) -> fileValue.toString()));
+        String tokenKey = LOGIN_USER_KEY + token;
+        stringRedisTemplate.opsForHash().putAll(tokenKey,userMap);
+
+        //7. 设置token有效期为30分钟，（使用一次该token就属性有效期在拦截器中有设置）
         stringRedisTemplate.expire(tokenKey,LOGIN_USER_TTL,TimeUnit.MINUTES);
 
+        //把token返回前端，前端每次请求都需要带着token
         return Result.ok(token);
     }
 
@@ -84,10 +81,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
 
     @Override
     public Result sendCode(String phone, HttpSession session) {
-        if(RegexUtils.isPhoneInvalid(phone)){
-            Result.fail("手机格式不正确");
-        }
+        //1. 验证手机格式是否正确
+        if(RegexUtils.isPhoneInvalid(phone)) return Result.fail("手机格式不正确");
+
+        //2. 随机生成验证码
         String code = RandomUtil.randomNumbers(6);
+
+        //把验证码存到redis
         stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone,code,LOGIN_CODE_TTL, TimeUnit.MINUTES);
         log.debug("发送验证码成功：" + code);
         return Result.ok();
