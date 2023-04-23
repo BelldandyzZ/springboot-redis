@@ -5,11 +5,13 @@ import cn.hutool.core.util.RandomUtil;
 import cn.hutool.log.Log;
 import com.hmdp.dto.LoginFormDTO;
 import com.hmdp.dto.Result;
+import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.UserInfo;
 import com.hmdp.service.IUserInfoService;
 import com.hmdp.service.IUserService;
 import com.hmdp.utils.RegexPatterns;
 import com.hmdp.utils.RegexUtils;
+import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
@@ -38,17 +40,9 @@ public class UserController {
     /**
      * 发送手机验证码
      */
-    @PostMapping("code")
+    @PostMapping("/code")
     public Result sendCode(@RequestParam("phone") String phone, HttpSession session) {
-        if(RegexUtils.isPhoneInvalid(phone)){
-            Result.fail("手机格式不正确");
-        }
-
-        String code = RandomUtil.randomNumbers(6);
-
-        session.setAttribute("code",code);
-        log.debug("发送验证码成功：" + code);
-        return Result.ok();
+        return userService.sendCode(phone,session);
     }
 
     /**
@@ -57,8 +51,7 @@ public class UserController {
      */
     @PostMapping("/login")
     public Result login(@RequestBody LoginFormDTO loginForm, HttpSession session){
-        // TODO 实现登录功能
-        return Result.fail("功能未完成");
+        return userService.login(loginForm,session);
     }
 
     /**
@@ -71,10 +64,14 @@ public class UserController {
         return Result.fail("功能未完成");
     }
 
+    /**
+     * 获取当前登录的用户并返回
+     * @return
+     */
     @GetMapping("/me")
     public Result me(){
-        // TODO 获取当前登录的用户并返回
-        return Result.fail("功能未完成");
+        UserDTO user = UserHolder.getUser();
+        return Result.ok(user);
     }
 
     @GetMapping("/info/{id}")
