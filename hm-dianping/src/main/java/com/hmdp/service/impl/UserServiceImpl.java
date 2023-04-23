@@ -1,6 +1,8 @@
 package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.bean.copier.CopyOptions;
+import cn.hutool.core.lang.UUID;
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.dto.LoginFormDTO;
@@ -17,6 +19,11 @@ import org.springframework.stereotype.Service;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import static com.hmdp.utils.RedisConstants.*;
 import static com.hmdp.utils.SystemConstants.USER_NICK_NAME_PREFIX;
 
 /**
@@ -40,8 +47,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             Result.fail("手机格式不正确");
         }
         String code = loginForm.getCode();
-        Object cacheCode = session.getAttribute("code");
-        if(code == null || !code.equals(cacheCode.toString())){
+        String cacheCode = stringRedisTemplate.opsForValue().get(LOGIN_CODE_KEY + phone);
+        if(code == null || !code.equals(cacheCode)){
             Result.fail("验证码错误");
         }
         User user = query().eq("phone", phone).one();
@@ -49,8 +56,22 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         if(user == null){
             user = createUserByPhone(phone);
         }
-        session.setAttribute("user", BeanUtil.copyProperties(user, UserDTO.class));
-        return Result.ok();
+        //1. 生成token
+        String token = UUID.randomUUID(true).toString();
+
+        //2. 将user以Hash结构存到redis
+        UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
+        Map<String, Object> map = BeanUtil.beanToMap(userDTO,new HashMap<>(),
+                CopyOptions.create()
+                .setIgnoreNullValue(true).setFieldValueEditor((fileName,fileValue) -> fileValue.toString())
+        );
+        String tokenKey = LOGIN_USER_KEY + token;
+        stringRedisTemplate.opsForHash().putAll(tokenKey,map);
+
+        //3. 设置token有效期
+        stringRedisTemplate.expire(tokenKey,LOGIN_USER_TTL,TimeUnit.MINUTES);
+
+        return Result.ok(token);
     }
 
     private User createUserByPhone(String phone) {
@@ -67,7 +88,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
             Result.fail("手机格式不正确");
         }
         String code = RandomUtil.randomNumbers(6);
-        session.setAttribute("code",code);
+        stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone,code,LOGIN_CODE_TTL, TimeUnit.MINUTES);
         log.debug("发送验证码成功：" + code);
         return Result.ok();
     }
