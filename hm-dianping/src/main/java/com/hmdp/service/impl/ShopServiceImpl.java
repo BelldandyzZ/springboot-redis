@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSON;
 import cn.hutool.json.JSONUtil;
@@ -43,26 +44,51 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             Shop shop = JSONUtil.toBean(cacheShop, Shop.class);
             return  Result.ok(shop);
         }
-
         //判断命中的是否是空值
         if("".equals(cacheShop)){
             return  Result.fail("店铺不存在");
         }
 
-        //4.不存在根据id查询数据库
-        Shop shop = getById(id);
+        Shop shop = null;
+        try {
+            //4.不存在则建立缓存（缓存击穿互斥锁建立缓存）
+            boolean flag = tryLock(LOCK_SHOP_KEY);
+            if(!flag){
+                //获取失败则等待之后重新查询
+                Thread.sleep(50);
+                return queryById(id);
+            }
+            //4.1 获取成功，获取成功则建立缓存key
+            shop = getById(id);
+            if(shop == null){
+                //5.在数据库中不存在则缓存""防止缓存穿透,然年返回错误信息
+                stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,"", CACHE_NULL_TTL, TimeUnit.MINUTES);
+                return Result.fail("店铺不存在");
+            }
+            //6.在数据库中存在则写入数据库
+            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,JSONUtil.toJsonStr(shop),
+                    CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
-        if(shop == null){
-            //5.在数据库中不存在则缓存""防止缓存穿透,然年返回错误信息
-            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,"", CACHE_NULL_TTL, TimeUnit.MINUTES);
-            return Result.fail("店铺不存在");
+        }catch (Exception e){
+            throw new RuntimeException(e);
+        }finally {
+            //释放互斥锁
+            unLock(LOCK_SHOP_KEY);
         }
-        //6.在数据库中存在则写入数据库
-        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,JSONUtil.toJsonStr(shop),
-                                                CACHE_SHOP_TTL, TimeUnit.MINUTES);
         //7.返回
         return Result.ok(shop);
     }
+
+    private boolean tryLock(String key){
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 2, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(flag);
+    }
+
+    private void unLock(String key){
+        stringRedisTemplate.delete(key);
+    }
+
+
 
     @Override
     @Transactional
