@@ -36,47 +36,57 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
-        //1.从redis查询缓存
-        String cacheShop = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
-        //2.判断是否存在
-        if(StrUtil.isNotBlank(cacheShop)){
-            //3.存在直接返回
-            Shop shop = JSONUtil.toBean(cacheShop, Shop.class);
-            return  Result.ok(shop);
-        }
-        //判断命中的是否是空值
-        if("".equals(cacheShop)){
-            return  Result.fail("店铺不存在");
-        }
+        //1.判断缓存是否存在，存在则直接返回，不存在则开始建立缓存
+        Result checkCache = checkCache(CACHE_SHOP_KEY,id);
+        if (checkCache != null) return checkCache;
 
         Shop shop = null;
         try {
-            //4.不存在则建立缓存（缓存击穿互斥锁建立缓存）
+            //2.使用互斥锁建立缓存防止缓存击穿
             boolean flag = tryLock(LOCK_SHOP_KEY);
             if(!flag){
-                //获取失败则等待之后重新查询
+                //3.获取互斥锁失败说明缓存正在重建中，则等待之后重新查询
                 Thread.sleep(50);
                 return queryById(id);
             }
-            //4.1 获取成功，获取成功则建立缓存key
+            //4.获取锁成功再次验证缓存是否存在，不存在则开始建立缓存
+            Result doubleCheck = checkCache(CACHE_SHOP_KEY,id);
+            if (doubleCheck != null) return doubleCheck;
+            //5.从数据库查询数据
             shop = getById(id);
             if(shop == null){
-                //5.在数据库中不存在则缓存""防止缓存穿透,然年返回错误信息
+                //6.数据为空说明该查询key和查询的数据在缓存和数据库中都不存在，此时缓存""防止缓存穿透,然后返回错误信息
                 stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,"", CACHE_NULL_TTL, TimeUnit.MINUTES);
                 return Result.fail("店铺不存在");
             }
-            //6.在数据库中存在则写入数据库
+            //7.数据从数据库中存在就写入缓存
             stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,JSONUtil.toJsonStr(shop),
                     CACHE_SHOP_TTL, TimeUnit.MINUTES);
-
         }catch (Exception e){
             throw new RuntimeException(e);
         }finally {
-            //释放互斥锁
+            //8.释放互斥锁
             unLock(LOCK_SHOP_KEY);
         }
-        //7.返回
+        //8.返回查询信息
         return Result.ok(shop);
+    }
+
+    private Result checkCache(String key,Long id) {
+        //1.从redis查询缓存
+        String cacheShop = stringRedisTemplate.opsForValue().get(key + id);
+        //2.判断缓存是否存在
+        if(StrUtil.isNotBlank(cacheShop)){
+            //3.缓存存在直接返回
+            Shop res = JSONUtil.toBean(cacheShop, Shop.class);
+            return  Result.ok(res);
+        }
+        //4. 判断命中的是否是空值
+        if("".equals(cacheShop)){
+            return  Result.fail("店铺不存在");
+        }
+        //5.不存在也不是空值则返回空，返回主方法开始建立缓存
+        return null;
     }
 
     private boolean tryLock(String key){
@@ -87,7 +97,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     private void unLock(String key){
         stringRedisTemplate.delete(key);
     }
-
 
 
     @Override
