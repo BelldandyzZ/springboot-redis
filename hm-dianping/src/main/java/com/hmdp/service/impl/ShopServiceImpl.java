@@ -9,6 +9,7 @@ import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.RedisData;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +17,10 @@ import org.springframework.util.StringUtils;
 
 import javax.annotation.Resource;
 
+import java.time.LocalDateTime;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static com.hmdp.utils.RedisConstants.*;
@@ -31,71 +36,70 @@ import static com.hmdp.utils.RedisConstants.*;
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
 
+    private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
+
     @Resource
     private StringRedisTemplate stringRedisTemplate;
 
+
     @Override
     public Result queryById(Long id) {
-        //1.判断缓存是否存在，存在则直接返回，不存在则开始建立缓存
-        Result checkCache = checkCache(CACHE_SHOP_KEY,id);
-        if (checkCache != null) return checkCache;
+        /*
+        * 使用逻辑过期完成缓存击穿问题，逻辑过期就是在redis中永不过期，自己在缓存的数据中设置一个过期时间
+        * 这个缓存一般都会做预热处理，就是在程序运行之前把缓存先导入进去
+        */
 
-        Shop shop = null;
-        try {
-            //2.使用互斥锁建立缓存防止缓存击穿
-            boolean flag = tryLock(LOCK_SHOP_KEY);
-            if(!flag){
-                //3.获取互斥锁失败说明缓存正在重建中，则等待之后重新查询
-                Thread.sleep(50);
-                return queryById(id);
-            }
-            //4.获取锁成功再次验证缓存是否存在，不存在则开始建立缓存
-            Result doubleCheck = checkCache(CACHE_SHOP_KEY,id);
-            if (doubleCheck != null) return doubleCheck;
-            //5.从数据库查询数据
-            shop = getById(id);
-            if(shop == null){
-                //6.数据为空说明该查询key和查询的数据在缓存和数据库中都不存在，此时缓存""防止缓存穿透,然后返回错误信息
-                stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,"", CACHE_NULL_TTL, TimeUnit.MINUTES);
-                return Result.fail("店铺不存在");
-            }
-            //7.数据从数据库中存在就写入缓存
-            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,JSONUtil.toJsonStr(shop),
-                    CACHE_SHOP_TTL, TimeUnit.MINUTES);
-        }catch (Exception e){
-            throw new RuntimeException(e);
-        }finally {
-            //8.释放互斥锁
-            unLock(LOCK_SHOP_KEY);
-        }
-        //8.返回查询信息
-        return Result.ok(shop);
-    }
-
-    private Result checkCache(String key,Long id) {
         //1.从redis查询缓存
-        String cacheShop = stringRedisTemplate.opsForValue().get(key + id);
-        //2.判断缓存是否存在
-        if(StrUtil.isNotBlank(cacheShop)){
-            //3.缓存存在直接返回
-            Shop res = JSONUtil.toBean(cacheShop, Shop.class);
-            return  Result.ok(res);
+        String cache = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
+
+        //2.缓存不存在直接返回null,因为是逻辑过期，这里永不成立
+        if(StrUtil.isBlank(cache)){
+            return  null;
         }
-        //4. 判断命中的是否是空值
-        if("".equals(cacheShop)){
-            return  Result.fail("店铺不存在");
+        //3.缓存存则在判断是否过期
+        RedisData redisData = JSONUtil.toBean(cache, RedisData.class);
+        //4.未过期则直接返回数据
+        LocalDateTime expireTime = redisData.getExpireTime();
+        if(expireTime.isAfter(LocalDateTime.now())){
+            return Result.ok(redisData.getData());
         }
-        //5.不存在也不是空值则返回空，返回主方法开始建立缓存
-        return null;
+        //6.过期了则重建缓存,获取重建缓存的锁
+        boolean flag = tryLock(LOCK_SHOP_KEY);
+        if(flag){
+            System.out.println(Thread.currentThread().getName() + "拿到了锁");
+            //7.获取锁成功直接返回过期的数据，然后开一个线程重建缓存
+            CACHE_REBUILD_EXECUTOR.submit(()->{
+                try {
+                    buildCache(10L,id);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }finally {
+                    //9.重建完成释放锁
+                    System.out.println(Thread.currentThread().getName() +"线程释放了锁");
+                    unLock(LOCK_SHOP_KEY);
+                }
+            });
+        }
+        //10.获取失败则说明已经有其他线程正在重建缓存，直接返回过期的旧数据
+        return Result.ok(redisData.getData());
     }
 
     private boolean tryLock(String key){
-        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 2, TimeUnit.SECONDS);
+        Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
+        System.out.println(Thread.currentThread().getName() +"线程的锁为:" + flag);
         return BooleanUtil.isTrue(flag);
     }
 
     private void unLock(String key){
         stringRedisTemplate.delete(key);
+    }
+
+    public void buildCache(Long expireSecond,Long id){
+        Shop shop = getById(id);
+        RedisData redisData = new RedisData();
+        redisData.setData(shop);
+        redisData.setExpireTime(LocalDateTime.now().plusSeconds(expireSecond));
+        stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id,JSONUtil.toJsonStr(redisData));
     }
 
 
