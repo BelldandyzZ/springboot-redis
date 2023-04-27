@@ -32,7 +32,7 @@
           </elementProp>
           <stringProp name="HTTPSampler.domain">localhost</stringProp>
           <stringProp name="HTTPSampler.port">8081</stringProp>
-          <stringProp name="HTTPSampler.protocol">HTTP</stringProp>
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
           <stringProp name="HTTPSampler.contentEncoding">UTF-8</stringProp>
           <stringProp name="HTTPSampler.path">/voucher-order/seckill/10</stringProp>
           <stringProp name="HTTPSampler.method">POST</stringProp>
@@ -160,7 +160,7 @@
             <collectionProp name="HeaderManager.headers">
               <elementProp name="" elementType="Header">
                 <stringProp name="Header.name">authorization</stringProp>
-                <stringProp name="Header.value">f7bc575b-5e89-4883-a85d-429f4ba6154e</stringProp>
+                <stringProp name="Header.value">737c74cd-9e15-4993-bbd3-8db62b391bed</stringProp>
               </elementProp>
             </collectionProp>
           </HeaderManager>
