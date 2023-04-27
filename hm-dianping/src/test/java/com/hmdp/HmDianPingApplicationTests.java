@@ -13,6 +13,9 @@ class HmDianPingApplicationTests {
 
     @Test
     void buildCache(){
-        shopService.buildCache(10L,1L);
+        for (long i = 1; i <= 9 ; i++) {
+            shopService.buildCache(10L,i);
+        }
+
     }
 }
