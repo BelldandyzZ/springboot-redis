@@ -64,9 +64,13 @@
 
 ![](img/分布式锁实现.jpg)
 
-③使用Redis实现分布式锁
+
+
+## ③使用Redis实现分布式锁
 
 > 见Git代码 `秒杀-使用Redis实现分布式锁`
+>
+> 伪代码：利用redis的setnx的互斥性当作锁，设置一个过期时间用来做锁释放的兜底策略。当获取锁的时候使用setnx向redis存，释放锁的时候则删除setnx存的数据
 
 
 
@@ -82,3 +86,10 @@
 
 
 
+④基于Redis的分布式工具Redisson
+
+**使用setnx作为分布式锁有下面几个问题**
+
+![](img/setnx实现分布式锁的缺点.jpg)
+
+> Redisson是一个基于redis的分布式工具的集合，使用Redisson解决以上问题
