@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import com.hmdp.dto.Result;
 import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.SeckillVoucher;
@@ -10,16 +11,19 @@ import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
+import com.hmdp.utils.lock.SimpleRedisLock;
 import org.springframework.beans.BeansException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
 
-import static com.hmdp.utils.RedisConstants.BUSINESS_NAME;
+import static com.hmdp.utils.RedisConstants.*;
 
 /**
  * <p>
@@ -41,7 +45,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private IVoucherOrderService iVoucherOrderService;
 
-    private static int count = 1;
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     @Override
     public Result seckillVoucher(Long voucherId) {
@@ -60,18 +65,19 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (seckill.getStock() < 1) {
             return Result.fail("秒杀券库存不足");
         }
-
-        /*
-        (1)一人一单，所以锁的应该是用户。只有当同一个用户并发请求时才加锁，不同的用户不用加锁。
-        (2)不能使用Long当锁，因为Long是一个对象。使用字符串当作锁，需要加上intern()，因为toString()底层返回的时new String()
-        (3)需要锁整个方法，因为需要等事务提交之后才能释放锁。而事务实在方法执行完成之后才提交的
-        注意：这种解决方案只适合单机模式
-        */
         Long userId = UserHolder.getUser().getId();
-        synchronized (userId.toString().intern()){
+        SimpleRedisLock lock = new SimpleRedisLock(VOUCHER_ORDER_LOCK_PREFIX_KEY,userId.toString(),stringRedisTemplate);
+        boolean isLock = lock.tryLock(5L);
+        if (!isLock) {
+            return Result.fail("不允许并发下单！该优惠券每人限购一张");
+        }
+        try {
             return iVoucherOrderService.createVoucherOrder(voucherId);
+        } finally {
+            lock.unlock();
         }
     }
+
 
     @Transactional
     public Result createVoucherOrder(Long voucherId) {

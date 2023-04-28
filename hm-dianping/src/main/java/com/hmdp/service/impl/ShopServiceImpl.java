@@ -86,7 +86,6 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     private boolean tryLock(String key){
         Boolean flag = stringRedisTemplate.opsForValue().setIfAbsent(key, "1", 10, TimeUnit.SECONDS);
-        System.out.println(Thread.currentThread().getName() +"线程的锁为:" + flag);
         return BooleanUtil.isTrue(flag);
     }
 

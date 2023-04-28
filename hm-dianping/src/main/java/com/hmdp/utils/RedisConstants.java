@@ -23,4 +23,6 @@ public class RedisConstants {
     public static final String USER_SIGN_KEY = "sign:";
 
     public static final String BUSINESS_NAME = "order";
+
+    public static final String VOUCHER_ORDER_LOCK_PREFIX_KEY = "lock:voucher:order";
 }

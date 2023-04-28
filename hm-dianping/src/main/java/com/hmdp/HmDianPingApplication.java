@@ -10,7 +10,7 @@ public class HmDianPingApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(HmDianPingApplication.class, args);
-        System.out.println("====================启动成功====================");
+        System.out.println("========================================启动成功========================================");
     }
 
 }
