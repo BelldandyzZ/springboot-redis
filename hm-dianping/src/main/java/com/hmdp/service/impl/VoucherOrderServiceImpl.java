@@ -71,8 +71,8 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             return Result.fail("秒杀券库存不足");
         }
         Long userId = UserHolder.getUser().getId();
-        RLock lock = redissonClient.getLock(VOUCHER_ORDER_LOCK_PREFIX_KEY + userId);
-        boolean isLock = lock.tryLock();
+        SimpleRedisLock lock = new SimpleRedisLock(VOUCHER_ORDER_LOCK_PREFIX_KEY,userId.toString(),stringRedisTemplate);
+        boolean isLock = lock.tryLock(5L);
         if (!isLock) {
             return Result.fail("不允许并发下单！该优惠券每人限购一张");
         }
